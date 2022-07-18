@@ -1,0 +1,676 @@
+
+Public positions As Collection
+Public employees As Collection
+Public shifts As Collection
+Public history As Variant
+Public ConfigSheetName As String
+Public StartWithLine As Integer
+Public EndWithLine As Integer
+Public ShiftDay As String
+
+' v 1.0 - 2022.07.18
+Public Sub runProcess()
+
+Application.ScreenUpdating = False
+Application.DisplayAlerts = False
+
+    ReadProcessConfiguration
+ 
+  
+    
+   ' ThisWorkbook.Sheets(ConfigSheetName).columns("G").Sort key1:=ThisWorkbook.Sheets(ConfigSheetName).Range("G2"), order1:=xlAscending, Header:=xlYes
+    
+    createEmployeesList
+    
+    createEmptyPositions
+    
+    importHistory
+    
+    Dim employee As employee
+    
+    For Each employee In employees
+    
+        createEmployeeHistory employee
+        createEmployeePreferedPositions employee
+        
+        employee.employeeFlexibility = employee.preferredEmployeePosition.Count
+                     
+        assignPositon employee
+        
+        updateHistory employee
+
+    Next
+    
+    clearHistory
+    presentEmployees
+    presentLines
+    createRawList
+
+    ThisWorkbook.Save
+    
+    ThisWorkbook.Sheets(ConfigSheetName).Activate
+    
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    
+End Sub
+
+Public Sub ReadProcessConfiguration()
+
+   
+
+    ConfigSheetName = ActiveSheet.Name
+    
+    
+    ShiftDay = ThisWorkbook.Sheets(ConfigSheetName).Cells(10, "B")
+    
+    If ShiftDay = "" Then
+        
+        MsgBox "Nie podano dnia zmiany w arkuszu " + ConfigSheetName + " komórce B10", vbCritical
+        End
+    
+    End If
+        
+        For r = 7 To 1000
+        
+            If ThisWorkbook.Sheets("Zmiany").Cells(r, "A") = ShiftDay Then
+            
+            Set shifts = New Collection
+            
+                For c = 2 To 15
+                
+                    If ThisWorkbook.Sheets("Zmiany").Cells(r, c) <> "" Then
+                    
+                        shifts.Add ThisWorkbook.Sheets("Zmiany").Cells(r, c)
+                    Else
+                    
+                        Exit For
+                    
+                    End If
+                
+                Next
+                
+                Exit For
+            
+            End If
+            
+           
+        Next
+        
+        If shifts.Count = 0 Then
+        
+            MsgBox "Żadna zmiana nie jest przypisana do danego dnia. Sprawdź komórkę B9 w arkuszu " + ConfigSheetName + " vs." _
+                      + " zakres A7:A13 w arkuszu Metadane", vbCritical
+            End
+            
+        End If
+        
+    
+    StartWithLine = ThisWorkbook.Sheets(ConfigSheetName).Cells(11, "B")
+    
+    If StartWithLine = 0 Then
+        
+          MsgBox "Nie podano argumentu StartWithLine w arkuszu " + ConfigSheetName + " komórce B11", vbCritical
+            End
+    
+    End If
+    
+    
+    EndWithLine = ThisWorkbook.Sheets(ConfigSheetName).Cells(12, "B")
+    
+    If EndWithLine = 0 Then
+        
+        MsgBox "Nie podano argumentu EndWithLine w arkuszu " + ConfigSheetName + " komórce B12", vbCritical
+        End
+    
+    End If
+
+
+End Sub
+
+Public Sub createEmptyPositions()
+
+      Set positions = New Collection
+      
+      Dim position As position
+      Dim numberOfEmployeesInShift As Integer
+    Dim loopstep As Integer
+      
+      numberOfEmployeesInShift = employees.Count
+      
+        If StartWithLine <= EndWithLine Then
+            loopstep = 1
+        Else
+            loopstep = -1
+        End If
+      
+      For lin = StartWithLine To EndWithLine Step loopstep
+      
+        For pos = 3 To 40
+        
+           Set position = New position
+           
+            With position
+                .lineNumber = lin
+                .positionNumber = pos
+                .isAvailable = 1
+            End With
+            
+            positions.Add position
+            
+            If numberOfEmployeesInShift = positions.Count Then
+            
+               GoTo completed
+            End If
+                    
+        
+        Next
+        
+      
+      Next
+      
+completed:
+
+
+End Sub
+
+Public Sub createEmployeesList()
+
+
+    Dim lastPerson As String
+    Dim employee As employee
+    
+    Set employees = New Collection
+    
+    lastPerson = ThisWorkbook.Sheets(ConfigSheetName).Cells(1048573, "G").End(xlUp).row
+    
+    For i = 2 To lastPerson
+    
+        If CollectionValueExists(shifts, ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "H")) And ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "I") = "" Then
+    
+            Set employee = New employee
+            
+            employee.login = Application.WorksheetFunction.Trim(ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "G"))
+            
+            employee.Name = Application.WorksheetFunction.Trim(ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "F"))
+            
+            employee.Shift = Application.WorksheetFunction.Trim(ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "H"))
+            
+            employee.BadgeNumber = Application.WorksheetFunction.Trim(ThisWorkbook.Sheets(ConfigSheetName).Cells(i, "J"))
+            
+       
+            
+            employees.Add employee
+            
+        End If
+    Next
+    
+    If employees.Count = 0 Then
+        
+        MsgBox "Lista pracowników jest pusta lub żaden pracownik nie jest przepisany do bieżącej zmiany.", vbCritical
+        End
+    
+    End If
+    
+
+End Sub
+
+Public Sub importHistory()
+
+Dim lastHistoryRow As Integer
+
+    lastHistoryRow = ThisWorkbook.Sheets("Historia").Cells(1048573, "A").End(xlUp).row
+    
+    history = Range("A2:C" & lastHistoryRow).value
+
+End Sub
+
+Public Sub createEmployeeHistory(employee As employee)
+
+        Dim maxHistoryItems As Integer
+        Dim currenthistoryItem As Integer
+        
+        maxHistoryItems = 25
+        currenthistoryItem = 0
+
+        Set employee.employeeHistory = New Collection
+
+        For i = UBound(history, 1) To LBound(history, 1) Step -1
+
+             If history(i, 1) = employee.login Then
+             
+                employee.employeeHistory.Add history(i, 2)
+                currenthistoryItem = currenthistoryItem + 1
+             
+             End If
+             
+             If currenthistoryItem = maxHistoryItems Then
+                
+                Exit For
+             
+             End If
+
+        Next i
+
+
+End Sub
+
+Public Sub createEmployeePreferedPositions(employee As employee)
+
+    Dim NumberOfPositions As Integer
+    Dim i As Integer
+    
+    
+          Set employee.preferredEmployeePosition = New Collection
+    
+        For i = 3 To 40
+        
+            If CollectionValueExists(employee.employeeHistory, i) = False Then
+            
+                employee.preferredEmployeePosition.Add i
+            
+            End If
+        
+        Next
+        
+        'if there are no prefered positions new cycle begins
+        
+        If employee.preferredEmployeePosition.Count = 0 Then
+                
+                For i = 3 To 40
+                    
+                    employee.preferredEmployeePosition.Add i
+                
+                Next
+                
+            
+        End If
+
+
+End Sub
+
+Public Sub assignPositon(employee As employee)
+
+' the intersection of available positions and preference
+Dim intersection As Collection
+Set intersection = New Collection
+
+Dim pos As position
+
+
+    For Each pos In positions
+    
+        If pos.isAvailable = 1 Then
+        
+            For Each pre In employee.preferredEmployeePosition
+            
+                If pos.positionNumber = pre Then
+                
+                   If CollectionValueExists(intersection, pre) = False Then
+                    
+                    intersection.Add pre
+                    
+                   End If
+                
+                End If
+                
+            Next
+            
+        
+        End If
+    
+    Next
+    
+    If intersection.Count > 0 Then
+    
+    employee.isPositionExceptionallyAssigned = 0
+    
+    Dim positionIndex As Integer
+    positionIndex = Int((intersection.Count - 1 + 1) * Rnd + 1)
+    
+    
+    
+    Dim selectedposition As Integer
+    selectedposition = intersection(positionIndex)
+    
+    employee.assignedPosition = selectedposition
+    
+    
+    For Each pos In positions
+    
+        If pos.positionNumber = selectedposition And pos.isAvailable = 1 Then
+        
+            pos.isAvailable = 0
+            pos.assignedEmployeeLogin = employee.login
+            
+            employee.assignedLine = pos.lineNumber
+            
+            Exit For
+        
+        End If
+    
+    Next
+    
+    Else
+    
+    employee.isPositionExceptionallyAssigned = 1
+    
+     For Each pos In positions
+     
+        If pos.isAvailable = 1 Then
+            
+            pos.assignedEmployeeLogin = employee.login
+            pos.isAvailable = 0
+            employee.assignedLine = pos.lineNumber
+            employee.assignedPosition = pos.positionNumber
+             
+            
+            Exit For
+        
+        End If
+     
+     Next
+
+ 
+    End If
+
+
+End Sub
+
+Public Sub updateHistory(employee As employee)
+
+Dim newHistoryRow As Long
+
+    If employee.assignedLine > 0 And employee.assignedPosition > 0 Then
+      
+        newHistoryRow = ThisWorkbook.Sheets("Historia").Cells(1048573, "A").End(xlUp).row + 1
+        
+        ThisWorkbook.Sheets("Historia").Cells(newHistoryRow, "A") = employee.login
+        ThisWorkbook.Sheets("Historia").Cells(newHistoryRow, "B") = employee.assignedPosition
+        ThisWorkbook.Sheets("Historia").Cells(newHistoryRow, "C") = Date
+        ThisWorkbook.Sheets("Historia").Cells(newHistoryRow, "D") = employee.assignedLine
+        ThisWorkbook.Sheets("Historia").Cells(newHistoryRow, "E") = employee.isPositionExceptionallyAssigned
+        
+    End If
+
+
+End Sub
+
+Public Sub clearHistory()
+
+
+Dim historyLimit As Long
+Dim historyCount As Long
+Dim historyOffset As Long
+
+historyLimit = 14000
+
+historyCount = ThisWorkbook.Sheets("Historia").Cells(1048573, "A").End(xlUp).row - 1
+
+If historyCount > historyLimit Then
+    
+    historyOffset = historyCount - historyLimit + 1
+    
+    ThisWorkbook.Sheets("Historia").Rows("2:" & historyOffset).Delete
+
+End If
+
+
+
+End Sub
+
+Public Sub presentEmployees()
+ 
+    Dim emp As employee
+    Dim row As Integer
+    Dim currentEmployee As Integer
+    Dim col As Integer
+    Dim DashBoardName As String
+    Dim MoreThan120 As Integer
+    
+    
+    ThisWorkbook.Sheets("Dashboard-1").Rows("3:500").ClearContents
+    ThisWorkbook.Sheets("Dashboard-2").Rows("3:500").ClearContents
+    ThisWorkbook.Sheets("Dashboard-1").Cells(1, "A").MergeArea.ClearContents
+    ThisWorkbook.Sheets("Dashboard-1").Cells(1, "A").MergeArea.ClearContents
+    
+    ThisWorkbook.Sheets("Dashboard-1").Cells(1, "A") = ShiftDay
+    ThisWorkbook.Sheets("Dashboard-2").Cells(1, "A") = ShiftDay
+    
+    row = 3
+    currentEmployee = 0
+    MoreThan120 = 0
+    
+    DashBoardName = "Dashboard-1"
+
+    For Each emp In employees
+    
+    If emp.assignedLine <> 0 And emp.assignedPosition <> 0 Then
+    
+        currentEmployee = currentEmployee + 1
+        
+        If currentEmployee = 121 Then
+        
+            DashBoardName = "Dashboard-2"
+            currentEmployee = 1
+            row = 3
+            MoreThan120 = 1
+        
+        End If
+        
+        col = Application.WorksheetFunction.RoundUp(currentEmployee / 20, 0) * 2
+  
+        ThisWorkbook.Sheets(DashBoardName).Cells(row, col - 1) = emp.login
+        ThisWorkbook.Sheets(DashBoardName).Cells(row, col) = "'" & emp.assignedLine & "#" & emp.assignedPosition
+
+       
+        
+        If row Mod 22 = 0 Then
+        
+            row = row - 20
+        
+        End If
+        
+         row = row + 1
+         
+        End If
+          
+    Next
+    
+    
+    ThisWorkbook.Sheets("Dashboard-1").Visible = True
+    ThisWorkbook.Sheets("Dashboard-1").Copy
+    ThisWorkbook.Sheets("Dashboard-1").Visible = False
+        
+    If MoreThan120 = 1 Then
+        ThisWorkbook.Sheets("Dashboard-2").Visible = True
+        ThisWorkbook.Sheets("Dashboard-2").Copy
+        ThisWorkbook.Sheets("Dashboard-2").Visible = False
+        
+    
+    End If
+    
+
+End Sub
+
+Public Sub presentLines()
+
+    With ThisWorkbook.Sheets("Dashboard-Linie")
+        
+        .columns("B").ClearContents
+        .columns("E").ClearContents
+        .columns("H").ClearContents
+        .columns("K").ClearContents
+        .columns("N").ClearContents
+        .columns("Q").ClearContents
+        .columns("T").ClearContents
+        .Range("Y2:Y500").ClearContents
+    
+    End With
+    
+    Dim pos As position
+    Dim emp As employee
+    Dim c As Integer
+    Dim r As Integer
+    
+    For Each pos In positions
+    
+         r = pos.positionNumber + 2
+         c = 3 * pos.lineNumber - 1
+    
+        ThisWorkbook.Sheets("Dashboard-Linie").Cells(r, c) = pos.assignedEmployeeLogin
+    
+    Next
+    
+    Dim emptyLine As Integer
+    
+    For Each emp In employees
+    
+        If emp.assignedLine = 0 Or emp.assignedPosition = 0 Then
+        
+             emptyLine = ThisWorkbook.Sheets("Dashboard-Linie").Cells(1048573, "Y").End(xlUp).row + 1
+             
+             ThisWorkbook.Sheets("Dashboard-Linie").Cells(emptyLine, "Y") = emp.login
+        
+        End If
+    
+    Next
+    
+
+End Sub
+
+Public Sub createRawList()
+
+    ThisWorkbook.Sheets("RawList").Range("A2:B500").ClearContents
+    
+    Dim r As Integer
+    Dim emp As employee
+    Dim pos As String
+    r = 2
+    
+    For Each emp In employees
+    
+        If emp.assignedLine <> 0 And emp.assignedPosition <> 0 Then
+    
+            pos = CStr(emp.assignedPosition)
+            If Len(pos) = 1 Then pos = "0" + pos
+             
+            ThisWorkbook.Sheets("RawList").Cells(r, "A") = "'" + CStr(emp.assignedLine) + "-" + pos
+            ThisWorkbook.Sheets("RawList").Cells(r, "B") = emp.BadgeNumber
+            
+            r = r + 1
+        
+        End If
+    
+    Next
+
+End Sub
+
+Public Function CollectionValueExists(ByRef target As Collection, value As Variant) As Boolean
+    Dim index As Long
+    For index = 1 To target.Count
+        If target(index) = value Then
+            CollectionValueExists = True
+            Exit For
+        End If
+    Next index
+End Function
+
+Public Sub sendDataToHCFile()
+
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+
+    Dim HCFileNamePath As String
+    Dim HCFileName As String
+    Dim HCFile As Workbook
+    Dim WorkingRange As Range
+    Dim cell As Range
+    
+    Dim lookuptable As Range
+    Dim v As String
+    Dim off As Integer
+    
+    Set lookuptable = ThisWorkbook.Sheets("RawList").UsedRange
+    
+    HCFileNamePath = Application.GetOpenFilename()
+    
+    On Error GoTo FileNotSelected
+    
+    HCFileName = Right(HCFileNamePath, Len(HCFileNamePath) - InStrRev(HCFileNamePath, "\"))
+    
+    If IsWorkBookOpen(HCFileName) Then
+    
+      Set HCFile = Application.Workbooks.Item(HCFileName)
+    
+    Else
+    
+        Set HCFile = Workbooks.Open(HCFileNamePath)
+    
+    End If
+    
+       
+    
+    On Error GoTo 0
+    
+    Dim columns As Collection
+    
+    Set columns = New Collection
+    
+    columns.Add "E"
+    columns.Add "P"
+    columns.Add "AB"
+    columns.Add "AM"
+    
+    For Each c In columns
+    
+        If WorkingRange Is Nothing Then
+        
+            Set WorkingRange = HCFile.Sheets("Pracownicy").Range(c & "5:" & c & "20")
+        
+        Else
+        
+            Set WorkingRange = Union(WorkingRange, HCFile.Sheets("Pracownicy").Range(c & "5:" & c & "20"))
+            
+        End If
+        
+    
+    Set WorkingRange = Union(WorkingRange, HCFile.Sheets("Pracownicy").Range(c & "29:" & c & "44"))
+    Set WorkingRange = Union(WorkingRange, HCFile.Sheets("Pracownicy").Range(c & "53:" & c & "68"))
+    Set WorkingRange = Union(WorkingRange, HCFile.Sheets("Pracownicy").Range(c & "77:" & c & "92"))
+    
+    Next
+    
+   ' Debug.Print WorkingRange.Cells.Count
+
+    On Error Resume Next
+        For Each cell In WorkingRange
+        
+        
+        v = ""
+        v = Application.WorksheetFunction.VLookup(cell.value, lookuptable, 2, False)
+
+        If v <> "" Then
+
+            cell.Offset(0, 3).value = Application.WorksheetFunction.VLookup(cell.value, lookuptable, 2, False)
+        
+        End If
+
+        Next
+
+       On Error GoTo 0
+       
+       MsgBox "Dane zostały przesłane."
+
+FileNotSelected:
+    
+End Sub
+
+Function IsWorkBookOpen(Name As String) As Boolean
+    Dim xWb As Workbook
+    On Error Resume Next
+    Set xWb = Application.Workbooks.Item(Name)
+    IsWorkBookOpen = (Not xWb Is Nothing)
+End Function
+
+
